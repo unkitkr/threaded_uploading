@@ -18,13 +18,32 @@ def home():
 @app.route('/upload',methods=['POST', 'PUT'])
 def upload():
     file = request.files['upload_file']
-    print(file.filename)
     return jsonify({
         "Success": "Read the file"
-        })
+    })
+    
+
+#Generic route for pausing the upload
+@app.route('/pause', methods= ['GET'])
+def pause_upload():
+    return jsonify({
+        "Success": "Paused the operation"
+    }), 201
 
 
+#Generic route for resuming the upload
+@app.route('/resume', methods= ['GET'])
+def resume_upload():
+    return jsonify({
+        "Success": "resumed the operation"
+    }), 201
 
+#Generic route for stopping the upload
+@app.route('/stop', methods= ['GET'])
+def stop_upload():
+    return jsonify({
+        "Success": "Stopped the operation"
+    }), 201
 
 if __name__ == "__main__":
     app.run( debug=True)
