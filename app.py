@@ -1,5 +1,8 @@
 from flask import Flask, jsonify, request
 import threading
+from sqlalchemy import create_engine, engine
+import csv
+import pandas as pd
 
 app = Flask(__name__)
 
@@ -34,7 +37,10 @@ def is_stopped():
     if CURRENT_STATE == "STOPPED":
         return 1
     return 0
-
+def check_if_csv(file):
+    if file.split(".")[1] == "csv":
+        return 1
+    return 0
 
 
 #Home route, to verify app status.
@@ -47,12 +53,56 @@ def home():
 
 #Generic ETL route for testing.
 @app.route('/upload',methods=['POST', 'PUT'])
-def upload():
+def start_etl():
+    #check if some file is already under ETL
+    if is_uploading():
+        return jsonify({
+            "Error": "A file is under ETL"
+        }), 400
+
+    #check whether the file was sent along with form-data request
+    if not "upload_file" in request.files:
+        return jsonify({
+            "Error": "File not recieved"
+        }), 400
+
+    if not "table_name" in request.form:
+        return jsonify({
+            "Error": "Table name parameter not recieved"
+        }), 400
+    
     file = request.files['upload_file']
+    #check whether the file sent was a csv file
+    if not check_if_csv(file.filename):
+        return jsonify({
+        "Error": "Please upload a CSV file"
+        }), 400
+    
+    table_name = request.form["table_name"]
+
+    #since we dont know the size of the file, better to use a buffered stream, but it's already available in the pandas library
+    csv_database = create_engine('sqlite:///csv_database.db')
+
+    #check if a table already exists with a similar name
+    if csv_database.dialect.has_table(csv_database, table_name):
+        return jsonify({
+                "Error": "A table with similar name exists. Please try some other name."
+            })
+
+    for frame in pd.read_csv(file, chunksize= 1000, iterator=True):
+        print(frame)
+        try:
+            frame.to_sql(table_name, csv_database, if_exists='append')
+        except Exception as e:
+            return jsonify({
+                "Error": str(e)
+            })
+            break
+    
     return jsonify({
         "Success": "Read the file"
-    })
-    
+    }), 201
+        
 
 #Generic route for pausing the upload
 @app.route('/pause', methods= ['GET'])
