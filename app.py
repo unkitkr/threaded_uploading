@@ -15,7 +15,7 @@ thread = threading.Event()
 
 # All possible thread states. At any given point of time system would be in one single state.
 # Also not to be confused with OS process states.
-STATES = ("READY", "PAUSED", "UPLOADING", "STOPPED", "DONE")
+STATES = ("READY", "PAUSED", "UPLOADING", "TERMINATED", "DONE")
 
 # By default when application starts it must be on a ready state
 CURRENT_STATE = STATES[0]
@@ -41,6 +41,9 @@ def check_if_csv(file):
     if file.split(".")[1] == "csv":
         return 1
     return 0
+def change_state(state):
+    global CURRENT_STATE
+    CURRENT_STATE = state
 
 
 #Home route, to verify app status.
@@ -54,6 +57,9 @@ def home():
 #Generic ETL route for testing.
 @app.route('/upload',methods=['POST', 'PUT'])
 def start_etl():
+    # Accessing global CURRENT_STATE
+    global CURRENT_STATE
+
     #check if some file is already under ETL
     if is_uploading():
         return jsonify({
@@ -89,8 +95,24 @@ def start_etl():
                 "Error": "A table with similar name exists. Please try some other name."
             })
 
+    # it is safe to spawn thread to start uploading procedure
+    # this sets the internal flag to be true (Thread starts)
+    thread.set()
+
+    # Variable to keep check of any interupts (pause/terminate requests)
+    initialize_thread = 1
+
+    # At this point we may safely consider switching the state to uploading
+    change_state( STATES[2] )
+    #CURRENT_STATE = STATES[2]
+
     for frame in pd.read_csv(file, chunksize= 1000, iterator=True):
+        # checkpoint, will check at any point a terminate request 
+        thread.wait()
         print(frame)
+        # Check if anytime the status was changed to TERMINATED
+        if CURRENT_STATE == STATES[3]:
+            initialize_thread = 0
         try:
             frame.to_sql(table_name, csv_database, if_exists='append')
         except Exception as e:
@@ -98,23 +120,48 @@ def start_etl():
                 "Error": str(e)
             })
             break
+    if initialize_thread == 0:
+        CURRENT_STATE = STATES[3]
+        csv_database.drop(table_name)
+        return jsonify({
+        "Success": "Operation Stopped"
+        }), 201
     
+    change_state( STATES[4] )
     return jsonify({
         "Success": "Read the file"
     }), 201
         
 
-#Generic route for pausing the upload
+# #Generic route for pausing the upload
 @app.route('/pause', methods= ['GET'])
-def pause_upload():
+def pause_etl():
+    if CURRENT_STATE != STATES[2]:
+        return jsonify({
+        "Error": "No file under upload."
+        }), 400
+    
+    # Blocking the set() called in uploading route
+    thread.clear()
+    # Changing the CURRENT_STATE to PAUSED
+    change_state( STATES[1] )
     return jsonify({
         "Success": "Paused the operation"
     }), 201
 
 
-#Generic route for resuming the upload
+# Generic route for resuming the upload
 @app.route('/resume', methods= ['GET'])
-def resume_upload():
+def resume_etl():
+    if not is_paused():
+        return jsonify({
+        "Error": "No upload process is paused."
+        }), 400
+    # Releasing the blocked thread
+    thread.set()
+
+    #changing CURRENT_STATUS to Uploading
+    change_state( STATES[2] )
     return jsonify({
         "Success": "resumed the operation"
     }), 201
@@ -130,9 +177,10 @@ def stop_upload():
 #Get status
 @app.route('/getstate', methods=["GET"])
 def get_state():
+    global CURRENT_STATE
     return jsonify({
         "Current State": CURRENT_STATE
     })
 
 if __name__ == "__main__":
-    app.run( debug=True)
+    app.run( debug=True, threaded = True)
