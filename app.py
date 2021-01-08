@@ -1,6 +1,6 @@
 from flask import Flask, jsonify, request
 import threading
-from sqlalchemy import create_engine, engine
+from sqlalchemy import create_engine, engine, MetaData
 import csv
 import pandas as pd
 
@@ -86,8 +86,10 @@ def start_etl():
     
     table_name = request.form["table_name"]
 
-    #since we dont know the size of the file, better to use a buffered stream, but it's already available in the pandas library
+    #since we dont know the size of the file, better to use a buffered stream, available in the pandas library
     csv_database = create_engine('sqlite:///csv_database.db')
+
+    metadata = MetaData(csv_database)
 
     #check if a table already exists with a similar name
     if csv_database.dialect.has_table(csv_database, table_name):
@@ -113,6 +115,7 @@ def start_etl():
         # Check if anytime the status was changed to TERMINATED
         if CURRENT_STATE == STATES[3]:
             initialize_thread = 0
+            break
         try:
             frame.to_sql(table_name, csv_database, if_exists='append')
         except Exception as e:
@@ -122,7 +125,7 @@ def start_etl():
             break
     if initialize_thread == 0:
         CURRENT_STATE = STATES[3]
-        csv_database.drop(table_name)
+        csv_database.execute("DROP TABLE {}".format(table_name))
         return jsonify({
         "Success": "Operation Stopped"
         }), 201
@@ -169,6 +172,16 @@ def resume_etl():
 #Generic route for stopping the upload
 @app.route('/terminate', methods= ['GET'])
 def stop_upload():
+    # check if any upload is progressing or paused
+    if not is_paused() and not is_uploading():
+        return jsonify({
+        "Error": "No operation under progress"
+        }), 400
+
+    # Reset the internal flag and set the state to TERMINATED to triger the logic on line 114
+    thread.set()
+    change_state( STATES[3] )
+    print (CURRENT_STATE)
     return jsonify({
         "Success": "Terminated the operation"
     }), 201
