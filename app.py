@@ -125,6 +125,7 @@ def start_etl():
             break
     if initialize_thread == 0:
         CURRENT_STATE = STATES[3]
+        # Drop the database table since the operation was cancled
         csv_database.execute("DROP TABLE {}".format(table_name))
         return jsonify({
         "Success": "Operation Stopped"
@@ -132,7 +133,7 @@ def start_etl():
     
     change_state( STATES[4] )
     return jsonify({
-        "Success": "Read the file"
+        "Success": "ETL successful"
     }), 201
         
 
@@ -196,4 +197,4 @@ def get_state():
     })
 
 if __name__ == "__main__":
-    app.run( debug=True, threaded = True)
+    app.run(host = "0.0.0.0", port= 5000, debug=True, threaded = True)
